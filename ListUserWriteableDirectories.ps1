@@ -143,6 +143,6 @@ foreach ($directory in $SetACLOutputCsv)
       }
 
       # We found a relevant directory
-      $directory.Path + "," + $ACE.Trustee + "," + $ACE.Permissions + "," + $ACE.Inheritance
+      "`"" + $directory.Path + "`",`"" + $ACE.Trustee + "`"," + $ACE.Permissions + "," + $ACE.Inheritance
    }
 }

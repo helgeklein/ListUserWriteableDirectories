@@ -1,4 +1,4 @@
-# Scans the filesystem for directories that are user-writeable
+# ListUserWriteableDirectories: Scan the Filesystem for Directories That Are User-Writeable
 
 This PowerShell script uses [SetACL.exe](https://helgeklein.com/setacl/) to scan the filesystem for directories that are user-writeable.
 
@@ -22,9 +22,13 @@ For every directory that matches the configured criteria, the following properti
 
 The script's output is CSV-formatted. Sample output:
 
-    C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys,Everyone,write+read,no_inheritance
-    C:\Windows\System32\spool\SERVERS,BUILTIN\Users,FILE_ADD_FILE+FILE_ADD_SUBDIRECTORY+FILE_READ_EA+FILE_READ_ATTRIBUTES,container_inherit
-    C:\Windows\System32\Tasks,NT AUTHORITY\Authenticated Users,write+READ_CONTROL,container_inherit
+    "C:\Windows\System32\Microsoft\Crypto\RSA\MachineKeys","Everyone",write+read,no_inheritance
+    "C:\Windows\System32\spool\SERVERS","BUILTIN\Users",FILE_ADD_FILE+FILE_ADD_SUBDIRECTORY+FILE_READ_EA+FILE_READ_ATTRIBUTES,container_inherit
+    "C:\Windows\System32\Tasks","NT AUTHORITY\Authenticated Users",write+READ_CONTROL,container_inherit
+
+## How to Use
+
+Run the script as elevated user. More specifically: as a user with backup privileges. It works without elevation, too, but in that case is limited to those parts of the filesystem the user running it has access to.
 
 ## Examples
 
