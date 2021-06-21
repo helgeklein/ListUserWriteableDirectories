@@ -8,7 +8,8 @@
 
 Param(
    [Parameter(Mandatory, HelpMessage="Path to SetACL.exe")][string] $SetACLPath,
-   [Parameter(Mandatory, HelpMessage="The directory to scan (recursively)")][string] $ScanDirectory
+   [Parameter(Mandatory, HelpMessage="The directory to scan (recursively)")][string] $ScanDirectory,
+   [Parameter(HelpMessage="Include inherited permissions in the analysis?")][switch] $IncludeInherited = $false
 )
 
 ###################################
@@ -59,79 +60,41 @@ if (-Not (Test-Path $ScanDirectory))
    Write-Error "Could not find scan directory: <$ScanDirectory>"
    exit
 }
-
-# Run SetACL
-$SetACLOutput = & "$SetACLPath" -on "$ScanDirectory" -ot file -actn list -lst f:csv -rec cont -ignoreerr
-
-# Convert SetACL's output to objects
-$SetACLOutputCsv = ConvertFrom-Csv -InputObject $SetACLOutput -Header 'Path', 'Type', 'DACL'
-
-# Process SetACL's output
-foreach ($directory in $SetACLOutputCsv)
+if ($IncludeInherited)
 {
-   # Beautify the path
-   $directory.Path = $directory.Path.Replace("\\?\", "")
+   $inherited = "y"
+}
+else
+{
+   $inherited = "n"
+}
 
-   # Check if the directory should be excluded
-   $found = $false
-   foreach ($path in $pathDenylist)
+# Run SetACL, the output is written to a temporary file
+$tempFile = [System.IO.Path]::GetTempFileName()
+& "$SetACLPath" -on "$ScanDirectory" -ot file -actn list -lst "f:csv;i:$inherited" -rec cont -ignoreerr -bckp "$tempFile" -silent
+
+# Open SetACL's output file
+$reader = [System.IO.File]::OpenText($tempFile)
+
+try
+{
+   for()
    {
-      if ($directory.Path -like $path)
-      {
-         $found = $true
-         break
-      }
-   }
-   if ($found -eq $true)
-   {
-      continue
-   }
+      # Read the output line by line
+      $line = $reader.ReadLine()
+      if ($line -eq $null) { break }
+   
+      # Convert SetACL's output to an object
+      $directory = ConvertFrom-Csv -InputObject $line -Header 'Path', 'Type', 'DACL'
 
-   # Ignore messages from SetACL
-   if (!$directory.DACL)
-   {
-      continue
-   }
+      # Beautify the path
+      $directory.Path = $directory.Path.Replace("\\?\", "")
 
-   # Process the ACEs (they're colon-separated), ignoring the first line ("DACL(protected+auto_inherited):")
-   [array] $ACEStrings = $directory.DACL -split ":"
-   for ($i = 1; $i -lt $ACEStrings.Count; $i++)
-   {
-      # Convert the ACE to an object
-      $ACE = ConvertFrom-Csv -InputObject $ACEStrings[$i] -Header 'Trustee', 'Permissions', 'AccessMode', 'Inheritance'
-
-      # Ignore anything but access allowed
-      if ($ACE.AccessMode -ne "allow")
-      {
-         continue
-      }
-
-      # Ignore ACEs that are applied to subdirectories only
-      if ($ACE.Inheritance -like "*inherit_only*")
-      {
-         continue
-      }
-
-      # Check if the ACE's permissions should be included
+      # Check if the directory should be excluded
       $found = $false
-      foreach ($permission in $permissionsAllowlist)
+      foreach ($path in $pathDenylist)
       {
-         if ($ACE.Permissions -like "*$permission*")
-         {
-            $found = $true
-            break
-         }
-      }
-      if ($found -eq $false)
-      {
-         continue
-      }
-
-      # Check if the ACE's trustee (user/group) should be ignored
-      $found = $false
-      foreach ($trustee in $trusteeDenylist)
-      {
-         if ($ACE.Trustee -like $trustee)
+         if ($directory.Path -like $path)
          {
             $found = $true
             break
@@ -142,7 +105,70 @@ foreach ($directory in $SetACLOutputCsv)
          continue
       }
 
-      # We found a relevant directory
-      "`"" + $directory.Path + "`",`"" + $ACE.Trustee + "`"," + $ACE.Permissions + "," + $ACE.Inheritance
+      # Ignore messages from SetACL
+      if (!$directory.DACL)
+      {
+         continue
+      }
+
+      # Process the ACEs (they're colon-separated), ignoring the first line ("DACL(protected+auto_inherited):")
+      [array] $ACEStrings = $directory.DACL -split ":"
+      for ($i = 1; $i -lt $ACEStrings.Count; $i++)
+      {
+         # Convert the ACE to an object
+         $ACE = ConvertFrom-Csv -InputObject $ACEStrings[$i] -Header 'Trustee', 'Permissions', 'AccessMode', 'Inheritance'
+
+         # Ignore anything but access allowed
+         if ($ACE.AccessMode -ne "allow")
+         {
+            continue
+         }
+
+         # Ignore ACEs that are applied to subdirectories only
+         if ($ACE.Inheritance -like "*inherit_only*")
+         {
+            continue
+         }
+
+         # Check if the ACE's permissions should be included
+         $found = $false
+         foreach ($permission in $permissionsAllowlist)
+         {
+            if ($ACE.Permissions -like "*$permission*")
+            {
+               $found = $true
+               break
+            }
+         }
+         if ($found -eq $false)
+         {
+            continue
+         }
+
+         # Check if the ACE's trustee (user/group) should be ignored
+         $found = $false
+         foreach ($trustee in $trusteeDenylist)
+         {
+            if ($ACE.Trustee -like $trustee)
+            {
+               $found = $true
+               break
+            }
+         }
+         if ($found -eq $true)
+         {
+            continue
+         }
+
+         # We found a relevant directory
+         "`"" + $directory.Path + "`",`"" + $ACE.Trustee + "`"," + $ACE.Permissions + "," + $ACE.Inheritance
+      }
    }
 }
+finally
+{
+   $reader.Close()
+}
+
+# Delete the SetACL output file
+Remove-Item -Path $tempFile
